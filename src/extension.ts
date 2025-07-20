@@ -1,11 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { exec } from 'child_process';
-import { promisify } from 'util';
 import { getWebviewContent } from './webview';
-
-const execAsync = promisify(exec);
 
 // Debug flag - set to true to enable verbose logging
 const DEBUG = false;
@@ -25,6 +21,21 @@ function errorLog(...args: any[]) {
 // Info logging helper (always shown for important events)
 function infoLog(...args: any[]) {
   console.log('[DiffPilot]', ...args);
+}
+
+// Git API helper
+async function getGitAPI() {
+  const gitExtension = vscode.extensions.getExtension('vscode.git');
+  if (!gitExtension) {
+    throw new Error('Git extension not available');
+  }
+  
+  if (!gitExtension.isActive) {
+    await gitExtension.activate();
+  }
+  
+  const gitApi = gitExtension.exports.getAPI(1);
+  return gitApi;
 }
 
 interface ReviewComment {
@@ -88,43 +99,85 @@ class ChangedFilesProvider implements vscode.TreeDataProvider<ChangedFile> {
     if (!workspaceRoot) return [];
 
     try {
-      // Get all changes including untracked files
-      const { stdout: statusOutput } = await execAsync('git status --porcelain', { cwd: workspaceRoot });
-      debugLog('Git status output lines:', statusOutput.trim().split('\n').length);
+      const gitAPI = await getGitAPI();
+      const repository = gitAPI.repositories.find((repo: any) => 
+        repo.rootUri.fsPath === workspaceRoot
+      );
       
-      const files: ChangedFile[] = statusOutput.trim().split('\n')
-        .filter(line => line.length > 0)
-        .map(line => {
-          const statusCode = line.substring(0, 2);
-          const filePath = line.substring(2).trim();
-          
-          let status: ChangedFile['status'] = 'modified';
-          let staged = false;
-          
-          // Parse git status codes
-          const indexStatus = statusCode[0];
-          const workTreeStatus = statusCode[1];
-          
-          if (indexStatus !== ' ' && indexStatus !== '?') {
-            staged = true;
-          }
-          
-          if (statusCode === '??') {
+      if (!repository) {
+        throw new Error('No Git repository found in workspace');
+      }
+      
+      const changes = repository.state.workingTreeChanges;
+      const indexChanges = repository.state.indexChanges;
+      const untrackedChanges = repository.state.untrackedChanges || [];
+      
+      // Combine all changes
+      const changeMap = new Map<string, ChangedFile>();
+      
+      // Process index changes (staged)
+      indexChanges.forEach((change: any) => {
+        const relativePath = path.relative(workspaceRoot, change.uri.fsPath);
+        let status: ChangedFile['status'] = 'modified';
+        
+        switch (change.status) {
+          case 7: // UNTRACKED
             status = 'untracked';
-          } else if (indexStatus === 'A' || workTreeStatus === 'A') {
+            break;
+          case 6: // ADDED
+          case 14: // ADDED_BY_US
+          case 15: // ADDED_BY_THEM
             status = 'added';
-          } else if (indexStatus === 'D' || workTreeStatus === 'D') {
+            break;
+          case 2: // DELETED
+          case 12: // DELETED_BY_US
+          case 13: // DELETED_BY_THEM
             status = 'deleted';
-          } else {
+            break;
+          default:
             status = 'modified';
+        }
+        
+        changeMap.set(relativePath, { path: relativePath, status, staged: true });
+      });
+      
+      // Process working tree changes (unstaged)
+      changes.forEach((change: any) => {
+        const relativePath = path.relative(workspaceRoot, change.uri.fsPath);
+        if (!changeMap.has(relativePath)) {
+          let status: ChangedFile['status'] = 'modified';
+          
+          switch (change.status) {
+            case 7: // UNTRACKED
+              status = 'untracked';
+              break;
+            case 6: // ADDED
+            case 14: // ADDED_BY_US
+            case 15: // ADDED_BY_THEM
+              status = 'added';
+              break;
+            case 2: // DELETED
+            case 12: // DELETED_BY_US
+            case 13: // DELETED_BY_THEM
+              status = 'deleted';
+              break;
+            default:
+              status = 'modified';
           }
           
-          return {
-            path: filePath,
-            status,
-            staged
-          };
-        })
+          changeMap.set(relativePath, { path: relativePath, status, staged: false });
+        }
+      });
+      
+      // Add untracked files
+      untrackedChanges.forEach((uri: vscode.Uri) => {
+        const relativePath = path.relative(workspaceRoot, uri.fsPath);
+        if (!changeMap.has(relativePath)) {
+          changeMap.set(relativePath, { path: relativePath, status: 'untracked', staged: false });
+        }
+      });
+      
+      const files = Array.from(changeMap.values())
         .filter(file => {
           // Filter out directories
           const fullPath = path.join(workspaceRoot, file.path);
@@ -141,6 +194,8 @@ class ChangedFilesProvider implements vscode.TreeDataProvider<ChangedFile> {
             return true;
           }
         });
+      
+      debugLog('Found', files.length, 'changed files');
       
       return files.sort((a, b) => {
         // Sort by status then by path
@@ -256,7 +311,16 @@ class FileReviewPanel {
         debugLog('Diff content created for new file');
       } else if (file.status === 'modified') {
         // For modified files, get the diff
-        const { stdout: originalContent } = await execAsync(`git show HEAD:"${file.path}"`, { cwd: workspaceRoot });
+        const gitAPI = await getGitAPI();
+        const repository = gitAPI.repositories.find((repo: any) => 
+          repo.rootUri.fsPath === workspaceRoot
+        );
+        
+        if (!repository) {
+          throw new Error('No Git repository found');
+        }
+        
+        const originalContent = await repository.show('HEAD', file.path);
         const modifiedContent = fs.readFileSync(fullPath, 'utf8');
         
         this.diffContent = {
@@ -267,7 +331,16 @@ class FileReviewPanel {
         this.fileContent = modifiedContent;
       } else if (file.status === 'deleted') {
         // For deleted files, show everything as removed
-        const { stdout: deletedContent } = await execAsync(`git show HEAD:"${file.path}"`, { cwd: workspaceRoot });
+        const gitAPI = await getGitAPI();
+        const repository = gitAPI.repositories.find((repo: any) => 
+          repo.rootUri.fsPath === workspaceRoot
+        );
+        
+        if (!repository) {
+          throw new Error('No Git repository found');
+        }
+        
+        const deletedContent = await repository.show('HEAD', file.path);
         this.fileContent = deletedContent;
         this.diffContent = {
           original: deletedContent,
@@ -584,9 +657,13 @@ export class DiffPilotReviewer {
       const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       if (!workspaceRoot) return;
       
-      execAsync('git rev-parse --abbrev-ref HEAD', { cwd: workspaceRoot })
-        .then(({ stdout }) => {
-          const branch = stdout.trim();
+      getGitAPI().then(async gitAPI => {
+        const repository = gitAPI.repositories.find((repo: any) => 
+          repo.rootUri.fsPath === workspaceRoot
+        );
+        
+        if (repository && repository.state.HEAD && repository.state.HEAD.name) {
+          const branch = repository.state.HEAD.name;
           const filename = `review-${branch}.json`;
           const filepath = path.join(this.reviewsDir, filename);
           
@@ -596,10 +673,10 @@ export class DiffPilotReviewer {
             this.updateStatusBar();
             infoLog(`Loaded ${this.comments.length} existing comments for branch: ${branch}`);
           }
-        })
-        .catch(() => {
-          // Ignore errors
-        });
+        }
+      }).catch(() => {
+        // Ignore errors
+      });
     } catch (error) {
       // Ignore errors
     }
@@ -619,12 +696,19 @@ export class DiffPilotReviewer {
     if (!workspaceRoot) return;
     
     try {
-      const branch = (await execAsync('git rev-parse --abbrev-ref HEAD', { cwd: workspaceRoot })).stdout.trim();
-      this.currentReviewFile = `review-${branch}.md`;
+      const gitAPI = await getGitAPI();
+      const repository = gitAPI.repositories.find((repo: any) => 
+        repo.rootUri.fsPath === workspaceRoot
+      );
       
-      // Don't overwrite if we loaded existing comments
-      if (this.comments.length === 0) {
-        await this.autoSaveReview();
+      if (repository && repository.state.HEAD && repository.state.HEAD.name) {
+        const branch = repository.state.HEAD.name;
+        this.currentReviewFile = `review-${branch}.md`;
+        
+        // Don't overwrite if we loaded existing comments
+        if (this.comments.length === 0) {
+          await this.autoSaveReview();
+        }
       }
     } catch (error) {
       console.error('Failed to initialize review file:', error);
@@ -638,9 +722,22 @@ export class DiffPilotReviewer {
     }
     
     const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    const branch = workspaceRoot ? 
-      (await execAsync('git rev-parse --abbrev-ref HEAD', { cwd: workspaceRoot })).stdout.trim() : 
-      'unknown';
+    let branch = 'unknown';
+    
+    if (workspaceRoot) {
+      try {
+        const gitAPI = await getGitAPI();
+        const repository = gitAPI.repositories.find((repo: any) => 
+          repo.rootUri.fsPath === workspaceRoot
+        );
+        
+        if (repository && repository.state.HEAD && repository.state.HEAD.name) {
+          branch = repository.state.HEAD.name;
+        }
+      } catch (error) {
+        console.error('Error getting git branch:', error);
+      }
+    }
 
     const markdown = this.generateMarkdown(this.comments, branch);
     const filepath = path.join(this.reviewsDir, this.currentReviewFile);

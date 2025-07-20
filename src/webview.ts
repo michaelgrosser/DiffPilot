@@ -953,6 +953,9 @@ export function getWebviewContent(
         if (editType) editType.value = comment.type;
         const editPriority = document.querySelector(\`#edit-priority-\${comment.id}\`);
         if (editPriority) editPriority.value = comment.priority;
+        
+        // Hide the edit form and show the comment
+        window.cancelEdit(comment.id);
       }
 
       function handleCommentDeleted(commentId) {
