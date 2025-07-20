@@ -122,7 +122,8 @@ export function getWebviewContent(
   content: string,
   comments: any[],
   isDiff: boolean = false,
-  diffContent?: { original: string; modified: string }
+  diffContent?: { original: string; modified: string },
+  webview?: any
 ): string {
   if (DEBUG) console.log('[DiffPilot] getWebviewContent called for:', file, 'isDiff:', isDiff);
   let lines: (string | DiffLine)[] = [];
@@ -167,13 +168,31 @@ export function getWebviewContent(
     </html>`;
   }
 
+  // Generate a nonce for inline scripts and styles
+  const nonce = getNonce();
+  
+  // Content Security Policy
+  let cspSource = '';
+  if (webview && webview.cspSource) {
+    cspSource = webview.cspSource;
+  }
+  
+  const csp = `
+    default-src 'none';
+    style-src ${cspSource} 'nonce-${nonce}';
+    script-src 'nonce-${nonce}';
+    font-src ${cspSource};
+    img-src ${cspSource} data:;
+  `.replace(/\s+/g, ' ').trim();
+
   return `<!DOCTYPE html>
   <html lang="en">
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${file} - DiffPilot Review</title>
-    <style>
+    <meta http-equiv="Content-Security-Policy" content="${csp}">
+    <title>${escapeHtml(file)} - DiffPilot Review</title>
+    <style nonce="${nonce}">
       :root {
         --background: var(--vscode-editor-background);
         --foreground: var(--vscode-editor-foreground);
@@ -510,24 +529,24 @@ export function getWebviewContent(
             </div>
             
             ${lineComments.map(comment => `
-            <div class="comment-thread" id="comment-thread-${comment.id}" data-line="${lineNumber}">
-              <div class="comment" id="comment-${comment.id}">
+            <div class="comment-thread" id="comment-thread-${escapeHtml(comment.id)}" data-line="${lineNumber}">
+              <div class="comment" id="comment-${escapeHtml(comment.id)}">
                 <div class="comment-header">
                   <span class="comment-type">
-                    ${getTypeEmoji(comment.type)} ${comment.type}
+                    ${getTypeEmoji(comment.type)} ${escapeHtml(comment.type)}
                   </span>
                   <span class="comment-priority">
-                    ${getPriorityEmoji(comment.priority)} ${comment.priority}
+                    ${getPriorityEmoji(comment.priority)} ${escapeHtml(comment.priority)}
                   </span>
                   <span class="comment-time">${new Date(comment.timestamp).toLocaleString()}</span>
                 </div>
-                <div class="comment-body" data-action="edit" data-comment-id="${comment.id}" data-line="${lineNumber}">${escapeHtml(comment.comment)}</div>
+                <div class="comment-body" data-action="edit" data-comment-id="${escapeHtml(comment.id)}" data-line="${lineNumber}">${escapeHtml(comment.comment)}</div>
               </div>
               
-              <div id="edit-form-${comment.id}" class="edit-comment-form hidden">
+              <div id="edit-form-${escapeHtml(comment.id)}" class="edit-comment-form hidden">
                 <div class="form-group">
-                  <label for="edit-comment-${comment.id}">Comment</label>
-                  <textarea id="edit-comment-${comment.id}">${escapeHtml(comment.comment)}</textarea>
+                  <label for="edit-comment-${escapeHtml(comment.id)}">Comment</label>
+                  <textarea id="edit-comment-${escapeHtml(comment.id)}">${escapeHtml(comment.comment)}</textarea>
                 </div>
                 
                 <div class="form-group">
@@ -551,9 +570,9 @@ export function getWebviewContent(
                 </div>
                 
                 <div class="form-actions">
-                  <button class="secondary" data-action="delete" data-comment-id="${comment.id}">Delete</button>
-                  <button class="secondary" data-action="cancel-edit" data-comment-id="${comment.id}">Cancel</button>
-                  <button class="primary" data-action="save-edit" data-comment-id="${comment.id}" data-line="${lineNumber}">Save</button>
+                  <button class="secondary" data-action="delete" data-comment-id="${escapeHtml(comment.id)}">Delete</button>
+                  <button class="secondary" data-action="cancel-edit" data-comment-id="${escapeHtml(comment.id)}">Cancel</button>
+                  <button class="primary" data-action="save-edit" data-comment-id="${escapeHtml(comment.id)}" data-line="${lineNumber}">Save</button>
                 </div>
               </div>
             </div>
@@ -608,24 +627,24 @@ export function getWebviewContent(
             </div>
             
             ${lineComments.map(comment => `
-              <div class="comment-thread" id="comment-thread-${comment.id}" data-line="${lineNumber}">
-                <div class="comment" id="comment-${comment.id}">
+              <div class="comment-thread" id="comment-thread-${escapeHtml(comment.id)}" data-line="${lineNumber}">
+                <div class="comment" id="comment-${escapeHtml(comment.id)}">
                   <div class="comment-header">
                     <span class="comment-type">
-                      ${getTypeEmoji(comment.type)} ${comment.type}
+                      ${getTypeEmoji(comment.type)} ${escapeHtml(comment.type)}
                     </span>
                     <span class="comment-priority">
-                      ${getPriorityEmoji(comment.priority)} ${comment.priority}
+                      ${getPriorityEmoji(comment.priority)} ${escapeHtml(comment.priority)}
                     </span>
                     <span class="comment-time">${new Date(comment.timestamp).toLocaleString()}</span>
                   </div>
-                  <div class="comment-body" data-action="edit" data-comment-id="${comment.id}" data-line="${lineNumber}">${escapeHtml(comment.comment)}</div>
+                  <div class="comment-body" data-action="edit" data-comment-id="${escapeHtml(comment.id)}" data-line="${lineNumber}">${escapeHtml(comment.comment)}</div>
                 </div>
                 
-                <div id="edit-form-${comment.id}" class="edit-comment-form hidden">
+                <div id="edit-form-${escapeHtml(comment.id)}" class="edit-comment-form hidden">
                   <div class="form-group">
-                    <label for="edit-comment-${comment.id}">Comment</label>
-                    <textarea id="edit-comment-${comment.id}">${escapeHtml(comment.comment)}</textarea>
+                    <label for="edit-comment-${escapeHtml(comment.id)}">Comment</label>
+                    <textarea id="edit-comment-${escapeHtml(comment.id)}">${escapeHtml(comment.comment)}</textarea>
                   </div>
                   
                   <div class="form-group">
@@ -649,9 +668,9 @@ export function getWebviewContent(
                   </div>
                   
                   <div class="form-actions">
-                    <button class="secondary" onclick="deleteComment('${comment.id}')">Delete</button>
-                    <button class="secondary" onclick="cancelEdit('${comment.id}')">Cancel</button>
-                    <button class="primary" onclick="saveEdit('${comment.id}', ${lineNumber})">Save</button>
+                    <button class="secondary" data-action="delete" data-comment-id="${escapeHtml(comment.id)}">Delete</button>
+                    <button class="secondary" data-action="cancel-edit" data-comment-id="${escapeHtml(comment.id)}">Cancel</button>
+                    <button class="primary" data-action="save-edit" data-comment-id="${escapeHtml(comment.id)}" data-line="${lineNumber}">Save</button>
                   </div>
                 </div>
               </div>
@@ -684,8 +703,8 @@ export function getWebviewContent(
               </div>
               
               <div class="form-actions">
-                <button class="secondary" onclick="cancelComment(${lineNumber})">Cancel</button>
-                <button class="primary" onclick="submitComment(${lineNumber})">Comment</button>
+                <button class="secondary" data-action="cancel-comment" data-line="${lineNumber}">Cancel</button>
+                <button class="primary" data-action="submit-comment" data-line="${lineNumber}">Comment</button>
               </div>
             </div>
           `;
@@ -693,7 +712,7 @@ export function getWebviewContent(
       }).join('')}
     </div>
 
-    <script>
+    <script nonce="${nonce}">
       (function() {
         'use strict';
         
@@ -871,11 +890,11 @@ export function getWebviewContent(
         const lineElement = document.querySelector(\`.line[data-line="\${comment.line}"]\`);
         if (!lineElement) return;
         
-        let commentThread = document.querySelector(\`#comment-thread-\${comment.id}\`);
+        let commentThread = document.querySelector(\`#comment-thread-\${window.escapeHtml(comment.id)}\`);
         if (!commentThread) {
           commentThread = document.createElement('div');
           commentThread.className = 'comment-thread';
-          commentThread.id = \`comment-thread-\${comment.id}\`;
+          commentThread.id = \`comment-thread-\${window.escapeHtml(comment.id)}\`;
           commentThread.setAttribute('data-line', comment.line);
           
           const commentForm = document.querySelector(\`#comment-form-\${comment.line}\`);
@@ -887,23 +906,23 @@ export function getWebviewContent(
         }
         
         const commentHtml = \`
-          <div class="comment" id="comment-\${comment.id}">
+          <div class="comment" id="comment-\${window.escapeHtml(comment.id)}">
             <div class="comment-header">
               <span class="comment-type">
-                \${window.getTypeEmoji(comment.type)} \${comment.type}
+                \${window.getTypeEmoji(comment.type)} \${window.escapeHtml(comment.type)}
               </span>
               <span class="comment-priority">
-                \${window.getPriorityEmoji(comment.priority)} \${comment.priority}
+                \${window.getPriorityEmoji(comment.priority)} \${window.escapeHtml(comment.priority)}
               </span>
               <span class="comment-time">\${new Date(comment.timestamp).toLocaleString()}</span>
             </div>
-            <div class="comment-body" data-action="edit" data-comment-id="\${comment.id}" data-line="\${comment.line}">\${window.escapeHtml(comment.comment)}</div>
+            <div class="comment-body" data-action="edit" data-comment-id="\${window.escapeHtml(comment.id)}" data-line="\${comment.line}">\${window.escapeHtml(comment.comment)}</div>
           </div>
           
-          <div id="edit-form-\${comment.id}" class="edit-comment-form hidden">
+          <div id="edit-form-\${window.escapeHtml(comment.id)}" class="edit-comment-form hidden">
             <div class="form-group">
-              <label for="edit-comment-\${comment.id}">Comment</label>
-              <textarea id="edit-comment-\${comment.id}">\${window.escapeHtml(comment.comment)}</textarea>
+              <label for="edit-comment-\${window.escapeHtml(comment.id)}">Comment</label>
+              <textarea id="edit-comment-\${window.escapeHtml(comment.id)}">\${window.escapeHtml(comment.comment)}</textarea>
             </div>
             
             <div class="form-group">
@@ -927,9 +946,9 @@ export function getWebviewContent(
             </div>
             
             <div class="form-actions">
-              <button class="secondary" data-action="delete" data-comment-id="\${comment.id}">Delete</button>
-              <button class="secondary" data-action="cancel-edit" data-comment-id="\${comment.id}">Cancel</button>
-              <button class="primary" data-action="save-edit" data-comment-id="\${comment.id}" data-line="\${comment.line}">Save</button>
+              <button class="secondary" data-action="delete" data-comment-id="\${window.escapeHtml(comment.id)}">Delete</button>
+              <button class="secondary" data-action="cancel-edit" data-comment-id="\${window.escapeHtml(comment.id)}">Cancel</button>
+              <button class="primary" data-action="save-edit" data-comment-id="\${window.escapeHtml(comment.id)}" data-line="\${comment.line}">Save</button>
             </div>
           </div>
         \`;
@@ -939,7 +958,7 @@ export function getWebviewContent(
       }
 
       function handleCommentUpdated(comment) {
-        const commentDiv = document.querySelector(\`#comment-\${comment.id}\`);
+        const commentDiv = document.querySelector(\`#comment-\${window.escapeHtml(comment.id)}\`);
         if (commentDiv) {
           commentDiv.querySelector('.comment-body').textContent = comment.comment;
           commentDiv.querySelector('.comment-type').innerHTML = \`\${window.getTypeEmoji(comment.type)} \${comment.type}\`;
@@ -947,7 +966,7 @@ export function getWebviewContent(
           commentDiv.querySelector('.comment-time').textContent = new Date(comment.timestamp).toLocaleString();
         }
         
-        const editTextarea = document.querySelector(\`#edit-comment-\${comment.id}\`);
+        const editTextarea = document.querySelector(\`#edit-comment-\${window.escapeHtml(comment.id)}\`);
         if (editTextarea) editTextarea.value = comment.comment;
         const editType = document.querySelector(\`#edit-type-\${comment.id}\`);
         if (editType) editType.value = comment.type;
@@ -1107,4 +1126,13 @@ function getPriorityEmoji(priority: string): string {
     critical: '🔴'
   };
   return emojis[priority] || '';
+}
+
+function getNonce(): string {
+  let text = '';
+  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  for (let i = 0; i < 32; i++) {
+    text += possible.charAt(Math.floor(Math.random() * possible.length));
+  }
+  return text;
 }

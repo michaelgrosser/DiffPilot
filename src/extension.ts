@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getWebviewContent } from './webview';
+import { PathValidator } from './utils/validation';
 
 // Debug flag - set to true to enable verbose logging
 const DEBUG = false;
@@ -179,19 +180,32 @@ class ChangedFilesProvider implements vscode.TreeDataProvider<ChangedFile> {
       
       const files = Array.from(changeMap.values())
         .filter(file => {
-          // Filter out directories
-          const fullPath = path.join(workspaceRoot, file.path);
           try {
-            const stat = fs.statSync(fullPath);
-            const isFile = stat.isFile();
-            if (!isFile) {
-              debugLog('Filtering out directory:', file.path);
+            // Validate the path is within workspace
+            const fullPath = PathValidator.safeJoin(workspaceRoot, file.path);
+            
+            // For deleted files, we can't check if they exist
+            if (file.status === 'deleted') {
+              return true;
             }
-            return isFile;
-          } catch (err) {
-            // For deleted files or inaccessible paths, include them
-            debugLog('Could not stat file (likely deleted):', file.path);
-            return true;
+            
+            // Filter out directories
+            try {
+              const stat = fs.statSync(fullPath);
+              const isFile = stat.isFile();
+              if (!isFile) {
+                debugLog('Filtering out directory:', file.path);
+              }
+              return isFile;
+            } catch (err) {
+              // File might not exist yet (new files)
+              debugLog('Could not stat file:', file.path);
+              return true;
+            }
+          } catch (validationError) {
+            // Invalid path - filter it out
+            errorLog('Invalid file path detected:', file.path, validationError);
+            return false;
           }
         });
       
@@ -280,8 +294,39 @@ class FileReviewPanel {
   async show(file: ChangedFile, workspaceRoot: string) {
     debugLog('show() called with:', { file, workspaceRoot });
     this.currentFile = file;
-    const fullPath = path.join(workspaceRoot, file.path);
-    debugLog('Full path:', fullPath);
+    
+    let fullPath: string;
+    try {
+      // Validate and sanitize the file path
+      fullPath = PathValidator.safeJoin(workspaceRoot, file.path);
+      debugLog('Validated full path:', fullPath);
+    } catch (error) {
+      errorLog('Invalid file path:', file.path, error);
+      this.fileContent = `// Error: Invalid file path - ${error}`;
+      this.diffContent = {
+        original: '',
+        modified: this.fileContent
+      };
+      
+      // Show error in panel and return early
+      this.comments = [];
+      if (this.panel) {
+        this.panel.reveal();
+        this.panel.webview.html = '';
+      } else {
+        this.panel = vscode.window.createWebviewPanel(
+          'diffpilotReview',
+          `Review: ${file.path}`,
+          vscode.ViewColumn.One,
+          {
+            enableScripts: true,
+            retainContextWhenHidden: true
+          }
+        );
+      }
+      this.updateWebview();
+      return;
+    }
     
     // Reset diff content
     this.diffContent = undefined;
@@ -506,7 +551,8 @@ class FileReviewPanel {
         this.fileContent,
         this.comments,
         !!this.diffContent,  // Use diff view whenever we have diff content
-        this.diffContent
+        this.diffContent,
+        this.panel.webview
       );
       debugLog('HTML content generated, length:', htmlContent.length);
       // Add timestamp comment to force refresh and prevent caching
@@ -577,7 +623,15 @@ export class DiffPilotReviewer {
     const reviewsDir = config.get('reviewsDirectory', '.vscode/reviews');
     
     if (vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders[0]) {
-      return path.join(vscode.workspace.workspaceFolders[0].uri.fsPath, reviewsDir);
+      const workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+      try {
+        // Validate the reviews directory path
+        return PathValidator.safeJoin(workspaceRoot, reviewsDir);
+      } catch (error) {
+        errorLog('Invalid reviews directory path:', reviewsDir, error);
+        // Fall back to a safe default
+        return path.join(workspaceRoot, '.vscode', 'reviews');
+      }
     }
     return reviewsDir;
   }
@@ -664,14 +718,20 @@ export class DiffPilotReviewer {
         
         if (repository && repository.state.HEAD && repository.state.HEAD.name) {
           const branch = repository.state.HEAD.name;
-          const filename = `review-${branch}.json`;
-          const filepath = path.join(this.reviewsDir, filename);
-          
-          if (fs.existsSync(filepath)) {
-            const data = JSON.parse(fs.readFileSync(filepath, 'utf8'));
-            this.comments = data.comments || [];
-            this.updateStatusBar();
-            infoLog(`Loaded ${this.comments.length} existing comments for branch: ${branch}`);
+          try {
+            // Validate branch name to prevent path injection
+            const validatedBranch = PathValidator.validateBranchName(branch);
+            const filename = `review-${validatedBranch}.json`;
+            const filepath = PathValidator.safeJoin(this.reviewsDir, filename);
+            
+            if (fs.existsSync(filepath)) {
+              const data = JSON.parse(fs.readFileSync(filepath, 'utf8'));
+              this.comments = data.comments || [];
+              this.updateStatusBar();
+              infoLog(`Loaded ${this.comments.length} existing comments for branch: ${validatedBranch}`);
+            }
+          } catch (error) {
+            errorLog('Invalid branch name:', branch, error);
           }
         }
       }).catch(() => {
@@ -703,11 +763,18 @@ export class DiffPilotReviewer {
       
       if (repository && repository.state.HEAD && repository.state.HEAD.name) {
         const branch = repository.state.HEAD.name;
-        this.currentReviewFile = `review-${branch}.md`;
-        
-        // Don't overwrite if we loaded existing comments
-        if (this.comments.length === 0) {
-          await this.autoSaveReview();
+        try {
+          const validatedBranch = PathValidator.validateBranchName(branch);
+          this.currentReviewFile = `review-${validatedBranch}.md`;
+          
+          // Don't overwrite if we loaded existing comments
+          if (this.comments.length === 0) {
+            await this.autoSaveReview();
+          }
+        } catch (error) {
+          errorLog('Invalid branch name:', branch, error);
+          // Use a default safe filename
+          this.currentReviewFile = 'review-main.md';
         }
       }
     } catch (error) {
@@ -732,7 +799,12 @@ export class DiffPilotReviewer {
         );
         
         if (repository && repository.state.HEAD && repository.state.HEAD.name) {
-          branch = repository.state.HEAD.name;
+          try {
+            branch = PathValidator.validateBranchName(repository.state.HEAD.name);
+          } catch (error) {
+            errorLog('Invalid branch name for autoSave:', repository.state.HEAD.name, error);
+            branch = 'unknown';
+          }
         }
       } catch (error) {
         console.error('Error getting git branch:', error);
@@ -740,13 +812,19 @@ export class DiffPilotReviewer {
     }
 
     const markdown = this.generateMarkdown(this.comments, branch);
-    const filepath = path.join(this.reviewsDir, this.currentReviewFile);
-
-    fs.writeFileSync(filepath, markdown, 'utf8');
     
-    // Also save as JSON for programmatic access
-    const jsonPath = filepath.replace('.md', '.json');
-    fs.writeFileSync(jsonPath, JSON.stringify({ branch, comments: this.comments, lastUpdated: new Date().toISOString() }, null, 2), 'utf8');
+    try {
+      // Validate file path before writing
+      const filepath = PathValidator.safeJoin(this.reviewsDir, this.currentReviewFile);
+      fs.writeFileSync(filepath, markdown, 'utf8');
+      
+      // Also save as JSON for programmatic access
+      const jsonFilename = this.currentReviewFile.replace('.md', '.json');
+      const jsonPath = PathValidator.safeJoin(this.reviewsDir, jsonFilename);
+      fs.writeFileSync(jsonPath, JSON.stringify({ branch, comments: this.comments, lastUpdated: new Date().toISOString() }, null, 2), 'utf8');
+    } catch (error) {
+      errorLog('Error saving review file:', error);
+    }
   }
 
   private generateMarkdown(comments: ReviewComment[], branch: string): string {
