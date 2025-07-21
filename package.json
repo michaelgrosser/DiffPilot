@@ -1,0 +1,116 @@
+{
+    "name": "diffpilot",
+    "displayName": "DiffPilot",
+    "description": "GitHub-style code review for VS Code with AI-friendly markdown export",
+    "version": "0.2.0",
+    "publisher": "michael-grosser",
+    "engines": {
+        "vscode": "^1.74.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "keywords": [
+        "code review",
+        "git",
+        "diff",
+        "comments",
+        "AI",
+        "markdown",
+        "github"
+    ],
+    "icon": "media/icon.png",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/michaelgrosser/diffpilot"
+    },
+    "bugs": {
+        "url": "https://github.com/michaelgrosser/diffpilot/issues"
+    },
+    "homepage": "https://github.com/michaelgrosser/diffpilot#readme",
+    "license": "SEE LICENSE IN LICENSE.txt",
+    "activationEvents": [
+        "onView:diffpilot.changedFiles"
+    ],
+    "main": "./out/extension.js",
+    "contributes": {
+        "commands": [
+            {
+                "command": "diffpilot.refresh",
+                "title": "Refresh Changed Files",
+                "category": "DiffPilot",
+                "icon": "$(refresh)"
+            },
+            {
+                "command": "diffpilot.openFile",
+                "title": "Open File",
+                "category": "DiffPilot"
+            },
+            {
+                "command": "diffpilot.showReviewPanel",
+                "title": "Show Review Panel",
+                "category": "DiffPilot"
+            }
+        ],
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "diffpilot",
+                    "title": "DiffPilot",
+                    "icon": "$(git-pull-request)"
+                }
+            ]
+        },
+        "views": {
+            "diffpilot": [
+                {
+                    "id": "diffpilot.changedFiles",
+                    "name": "Changed Files",
+                    "icon": "$(git-pull-request)",
+                    "contextualTitle": "DiffPilot Changed Files"
+                }
+            ]
+        },
+        "menus": {
+            "view/title": [
+                {
+                    "command": "diffpilot.refresh",
+                    "when": "view == diffpilot.changedFiles",
+                    "group": "navigation"
+                }
+            ],
+            "commandPalette": [
+                {
+                    "command": "diffpilot.refresh"
+                },
+                {
+                    "command": "diffpilot.openFile",
+                    "when": "false"
+                }
+            ]
+        },
+        "configuration": {
+            "title": "DiffPilot",
+            "properties": {
+                "diffpilot.reviewsDirectory": {
+                    "type": "string",
+                    "default": ".vscode/reviews",
+                    "description": "Directory to store review markdown files"
+                }
+            }
+        },
+        "comments": {
+            "commentingRangeProvider": true
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./"
+    },
+    "devDependencies": {
+        "@types/node": "^16.18.126",
+        "@types/vscode": "^1.74.0",
+        "typescript": "^4.9.5"
+    }
+}
