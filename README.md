@@ -2,8 +2,6 @@
 
 A VS Code extension that provides GitHub-style code review functionality with AI-friendly markdown export. Review code changes, add inline comments, and export structured reviews that AI agents can use to automatically fix issues.
 
-![DiffPilot Icon](media/icon.png)
-
 ## Features
 
 - **GitHub-style Review Interface**: Dedicated activity bar panel showing all changed files
