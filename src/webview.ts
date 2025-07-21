@@ -1,3 +1,6 @@
+import * as vscode from 'vscode';
+import { ReviewComment } from './models/types';
+
 // Debug flag - set to true to enable verbose logging
 const DEBUG = false;
 
@@ -120,14 +123,14 @@ function computeDiff(original: string, modified: string): DiffLine[] {
 export function getWebviewContent(
   file: string,
   content: string,
-  comments: any[],
+  comments: ReviewComment[],
   isDiff: boolean = false,
   diffContent?: { original: string; modified: string },
-  webview?: any
+  webview?: vscode.Webview
 ): string {
   if (DEBUG) console.log('[DiffPilot] getWebviewContent called for:', file, 'isDiff:', isDiff);
   let lines: (string | DiffLine)[] = [];
-  let commentsByLine: { [key: number]: any[] } = {};
+  let commentsByLine: { [key: number]: ReviewComment[] } = {};
   
   try {
     if (isDiff && diffContent) {

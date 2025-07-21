@@ -1,5 +1,6 @@
 import * as path from 'path';
 import * as fs from 'fs';
+import { ValidationError } from '../models/errors';
 
 /**
  * Validates and sanitizes file paths to prevent path traversal attacks
@@ -21,12 +22,12 @@ export class PathValidator {
     
     // Ensure the resolved path is within the workspace
     if (!resolvedPath.startsWith(normalizedRoot)) {
-      throw new Error(`Path traversal attempt detected: ${filePath}`);
+      throw new ValidationError(`Path traversal attempt detected: ${filePath}`, 'filePath');
     }
     
     // Additional checks for suspicious patterns
     if (filePath.includes('\0')) {
-      throw new Error('Null bytes in path are not allowed');
+      throw new ValidationError('Null bytes in path are not allowed', 'filePath');
     }
     
     // Check for suspicious path segments
@@ -38,7 +39,7 @@ export class PathValidator {
     if (suspiciousSegments.length > 0) {
       // Allow .. only if the final resolved path is still within workspace
       if (!resolvedPath.startsWith(normalizedRoot)) {
-        throw new Error(`Invalid path segments detected: ${suspiciousSegments.join(', ')}`);
+        throw new ValidationError(`Invalid path segments detected: ${suspiciousSegments.join(', ')}`, 'filePath');
       }
     }
     
@@ -56,24 +57,24 @@ export class PathValidator {
     const invalidChars = /[\x00-\x1f\x7f ~^:?*\[\\]/;
     
     if (invalidChars.test(branchName)) {
-      throw new Error(`Invalid branch name: contains forbidden characters`);
+      throw new ValidationError(`Invalid branch name: contains forbidden characters`, 'branchName');
     }
     
     if (branchName.startsWith('.') || branchName.startsWith('-')) {
-      throw new Error(`Invalid branch name: cannot start with . or -`);
+      throw new ValidationError(`Invalid branch name: cannot start with . or -`, 'branchName');
     }
     
     if (branchName.endsWith('.') || branchName.endsWith('.lock')) {
-      throw new Error(`Invalid branch name: invalid ending`);
+      throw new ValidationError(`Invalid branch name: invalid ending`, 'branchName');
     }
     
     if (branchName.includes('..') || branchName.includes('//')) {
-      throw new Error(`Invalid branch name: contains invalid sequences`);
+      throw new ValidationError(`Invalid branch name: contains invalid sequences`, 'branchName');
     }
     
     // Limit branch name length
     if (branchName.length > 255) {
-      throw new Error(`Invalid branch name: too long (max 255 characters)`);
+      throw new ValidationError(`Invalid branch name: too long (max 255 characters)`, 'branchName');
     }
     
     return branchName;
